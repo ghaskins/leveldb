@@ -5,7 +5,7 @@
 # Inherit some settings from environment variables, if available
 CXX ?= g++
 CC  ?= gcc
-INSTALL_PATH ?= $(CURDIR)
+LIBDIR ?= $(PWD)
 
 #-----------------------------------------------
 # Uncomment exactly one of the lines labelled (A), (B), and (C) below
@@ -26,7 +26,9 @@ CXXFLAGS += -I. -I./include $(PLATFORM_CXXFLAGS) $(OPT)
 
 LDFLAGS += $(PLATFORM_LDFLAGS)
 
-LIBOBJECTS = $(SOURCES:.cc=.o)
+LIBTOOL ?= libtool
+
+LIBOBJECTS = $(SOURCES:.cc=.lo)
 MEMENVOBJECTS = $(MEMENV_SOURCES:.cc=.o)
 
 TESTUTIL = ./util/testutil.o
@@ -56,7 +58,6 @@ TESTS = \
 PROGRAMS = db_bench $(TESTS)
 BENCHMARKS = db_bench_sqlite3 db_bench_tree_db
 
-LIBRARY = libleveldb.a
 MEMENVLIBRARY = libmemenv.a
 
 default: all
@@ -66,30 +67,32 @@ ifneq ($(PLATFORM_SHARED_EXT),)
 # Update db.h if you change these.
 SHARED_MAJOR = 1
 SHARED_MINOR = 4
-SHARED1 = libleveldb.$(PLATFORM_SHARED_EXT)
-SHARED2 = $(SHARED1).$(SHARED_MAJOR)
-SHARED3 = $(SHARED1).$(SHARED_MAJOR).$(SHARED_MINOR)
-SHARED = $(SHARED1) $(SHARED2) $(SHARED3)
-$(SHARED3):
-	$(CXX) $(LDFLAGS) $(PLATFORM_SHARED_LDFLAGS)$(INSTALL_PATH)/$(SHARED2) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) $(SOURCES) -o $(SHARED3)
-$(SHARED2): $(SHARED3)
-	ln -fs $(SHARED3) $(SHARED2)
-$(SHARED1): $(SHARED3)
-	ln -fs $(SHARED3) $(SHARED1)
+SHAREDLIB = libleveldb.$(PLATFORM_SHARED_EXT)
+
+libleveldb.la: $(LIBOBJECTS)
+	@echo "Linking..."
+	@$(LIBTOOL) --mode=link $(CXX) $(LDFLAGS) -release $(SHARED_MAJOR).$(SHARED_MINOR) -rpath $(LIBDIR) -O $(LIBOBJECTS) -o $@
+
+install: libleveldb.la
+	@echo "Installing..."
+	@$(LIBTOOL) --mode=install cp libleveldb.la $(LIBDIR)/$(SHAREDLIB)
+
 endif
 
-all: $(SHARED) $(LIBRARY)
+all: libleveldb.la
 
 check: all $(PROGRAMS) $(TESTS)
 	for t in $(TESTS); do echo "***** Running $$t"; ./$$t || exit 1; done
 
 clean:
+	@find . -name "\.libs" | xargs rm -rf
+	@find . -name "*.lo" -delete
+	@find . -name "*.la" -delete
 	-rm -f $(PROGRAMS) $(BENCHMARKS) $(LIBRARY) $(SHARED) $(MEMENVLIBRARY) */*.o */*/*.o ios-x86/*/*.o ios-arm/*/*.o build_config.mk
 	-rm -rf ios-x86/* ios-arm/*
 
-$(LIBRARY): $(LIBOBJECTS)
-	rm -f $@
-	$(AR) -rs $@ $(LIBOBJECTS)
+%.lo: %.cc
+	@$(LIBTOOL) --mode=compile $(CXX) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) -c $? -o $@
 
 db_bench: db/db_bench.o $(LIBOBJECTS) $(TESTUTIL)
 	$(CXX) db/db_bench.o $(LIBOBJECTS) $(TESTUTIL) -o $@  $(LDFLAGS)
